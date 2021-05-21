@@ -1,0 +1,144 @@
+[//]: # ( vim: set filetype=Markdown: )
+[//]: # (<style type="text/css">body {visibility: hidden} </style>)
+[//]: # (<meta charset="utf-8">)
+[//]: # (<script src="site/Paradoc.js"> </script>)
+---
+title: Dronn API
+description: Description of the integration
+siteTemplate: siteTemplate.html
+---
+
+# Description of the integration
+
+### Preparation
+
+Before the campaign starts, the Dronn team creates a campaign with a fixed name (hereinafter called 'campaignName') in the system.
+
+The campaign specification includes values such as:
+- `strategy` - strategy of selecting telephone numbers for calls
+- `NO_ANSWER.min-reaching-break` - time interval between contact attempts if the recipient did not answer
+- `BUSY.min-reaching-break` - time interval between contact attempts if the recipient is busy
+- `config.strategy.calling-hours-start` - Campaign activation time (before this time, calls for this campaign are not performed)
+- `config.strategy.calling-hours-end` - Campaign deactivation time (after this hour, phone calls for this campaign do not execute)
+- `configRules` - special rules that allow you to change the above values depending on the conditions. Conditions usually change depending on the date. For example, other calling times on holidays.
+
+Then, a single dialogue is attached to this campaign or multiple dialogues are selected based on a predetermined logic.
+
+
+### Changing campaign settings via API
+
+The customer can control the settings through request `PATCH`
+`/campaigns/{campaignName}`.
+
+```json
+POST
+
+{
+  "mode": "ON",
+  "webhookUrl": "https://example.com/on-call-finished"
+}
+```
+
+- `mode` - is used to (de)activate the campaign
+- `webhookUrl` - server address to which POST request will be sent after each connection attempt (inbound or outbound). For more information, see API reference for `PATCH` `/campaigns/{campaignName}` in the Callbacks tab.
+
+For more information, see API reference.
+
+**NOTE**: In the API reference, all references to 'clientAnswers' refer to an obsolete format. The new deployments use the format documented later in this document. API reference will be updated to reflect the new format.
+
+### After the campaign starts - records management
+
+A detailed description of endpoints can be found in API reference.
+
+#### Import
+
+Using the POST API / campaigns / {campaignName} / records, you can add a set of records to be called on a given day. By passing the phones and numberOfTriesPerPhone parameters, you can overwrite the values ​​from the campaign configuration. These are optional values.
+
+`priority` is the relative priority of a record in a given campaign.
+
+`callingTime` is the period when the record is active. There will be outbound attempts to this record between 'startTime' and 'endTime'. This period must fall within the campaign hours on any given day.
+
+The import API returns the unique id of a given record in the dronn system and it can then be managed.
+
+#### Removal
+
+The record can be deleted using DELETE / campaigns / {campaignName} / records / {recordId}. Once removed, no attempts will be made to call the record.
+
+#### Updating
+
+You can update a record at any time using `PATCH` `/campaigns/{campaignName}/records/{recordId}`.
+
+```json
+{
+  "callingTime": {
+    "start": "2020-06-06T08:00:00Z",
+    "end": "2020-06-06T08:00:00Z"
+  },
+  "callParams": {
+    "name": "John",
+    "surname": "Doe",
+    "debt": "1000.23",
+    "birthDate": "2000-01-01"
+  },
+  "priority": 0
+}
+```
+
+**NOTE**: It is not possible to update 'numberOfTriesPerPhone' and 'phones'.
+
+### After starting the campaign - reporting
+
+After each contact attempt (inbound or outbound), a summary is sent to `webhookUrl`. More information above and in API reference.
+
+### Uploading recordings
+
+Recordings are sent to a designated sFTP server in a predetermined format. The name of the files can be anything you want. The files are packed in ZIP or sent individually.
+
+# Redirection to a consultant
+
+In order to handle the use case of connecting with a consultant, after pre-verification, we provide API GET / campaigns / {campaignName} / reports / transfer-dialog-info / {phoneNumber}. It returns, inter alia, clientAnswers so you can process the conversation, including checking if the person has been previously verified or checking the boundary conditions, such as threats, etc.
+
+A common way to use this API is to implement an inbound pre-verification dialogue that allows you to skip the caller verification step when inbound on CC.
+
+# New 'clientAnswers' format
+
+`clientAnswers` is a JSON array of `history_item`s. `history_item` is any human-robot interaction.
+
+We encourage you to consult the exact logic of extracting the desired information from clientAnswers with the participation of Dronn developers and the client.
+
+It is possible to adjust the 'clientAnswers' format. For this purpose, please contact your Account Manager from Dronn.
+
+```reason
+type status = { 
+  // Standarized status ID
+  internalId: string;
+  // type of a status. Configurable, typically "outcome"
+  typ: string;
+  // Human readable/custom name of the status.
+  title: string;
+  timestamp_iso8601_utc: string;
+}
+type history_item = {
+  // Uniquely identifiable node in a dialog.
+  // It corelates with a node with the same
+  // name in the visual representation of dialog.
+  requestName : string;
+  // Additional metadata added by a dialog designer
+  // to mark an event in a conversation
+  statuses : array<status>;
+  // Extracted pieces of data such as payment date etc.
+  //
+  // For example:
+  // if statuses containan a status such that
+  //   1. `typ` == `output`
+  //   2. and `internalId` == `willPay` 
+  // extract the `date` entity
+  //
+  // Different logic is applicable depending on
+  // the dialog design. For the example above to work
+  // the status would have to be placed after
+  // a date recognition (`delay`) model matched
+  // person's utterance.
+  entities : { <key>: <json> } ;
+}
+```
